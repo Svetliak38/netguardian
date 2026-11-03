@@ -1,0 +1,79 @@
+================================================================================
+ NETGUARDIAN 3.1.2
+ Подпись и снятие метки "скачано из Интернета"
+================================================================================
+
+1. UNBLOCK.CMD
+
+Файл UNBLOCK.cmd снимает с файлов релизной папки метку Zone.Identifier
+("скачано из Интернета"). Это убирает предупреждение "Открыть файл -
+предупреждение системы безопасности", если оно вызвано меткой загрузки.
+
+Запуск: правый клик -> "Запуск от имени администратора" (обычно достаточно
+обычного запуска), затем закрыть окно.
+
+Эквивалент в PowerShell:
+
+    Get-ChildItem -LiteralPath "C:\путь\к\NetGuardian-3.1.2-release" -Recurse -File |
+        Unblock-File
+
+
+2. ТЕСТОВАЯ ПОДПИСЬ (ТОЛЬКО ДЛЯ ЭТОЙ МАШИНЫ)
+
+Релизные exe подписаны самоподписанным сертификатом:
+
+    Subject:     CN=Svetliak, O=Svetliak, C=RU
+    Thumbprint:  52BCB59416F9A48B7F567340FDE8FC22347BAF38
+    Действует:   до 01.11.2029
+
+Сертификат добавлен в хранилища текущего пользователя:
+    Cert:\CurrentUser\Root
+    Cert:\CurrentUser\TrustedPublisher
+    Cert:\CurrentUser\TrustedPeople
+
+Поэтому на этой машине Windows считает подпись действительной и не должна
+писать "Неизвестный издатель".
+
+Проверка:
+
+    Get-AuthenticodeSignature "C:\Tools\NetGuardian-3.1.2-release\NetGuardian.exe"
+    signtool verify /pa /v "C:\Tools\NetGuardian-3.1.2-release\NetGuardian.exe"
+
+Ожидается Status = Valid, Signer = CN=Svetliak.
+
+Удалить тестовое доверие (вернуть предупреждение):
+
+    certutil -user -delstore Root 52BCB59416F9A48B7F567340FDE8FC22347BAF38
+    certutil -user -delstore TrustedPublisher 52BCB59416F9A48B7F567340FDE8FC22347BAF38
+    certutil -user -delstore TrustedPeople 52BCB59416F9A48B7F567340FDE8FC22347BAF38
+    Get-ChildItem Cert:\CurrentUser\My\52BCB59416F9A48B7F567340FDE8FC22347BAF38 -ErrorAction SilentlyContinue | Remove-Item -DeleteKey
+
+Сам подписанный EXE при этом останется подписанным, но без доверенного
+корня Windows снова будет считать издателя неизвестным.
+
+
+3. ПУБЛИЧНЫЙ РЕЛИЗ
+
+Самоподписанный сертификат подходит только для теста на своей машине.
+У пользователей в EU вашего корневого сертификата нет, поэтому предупреждение
+вернётся.
+
+Для публичного релиза нужен сертификат от публичного CA:
+
+    - OV code signing (дешевле, репутация набирается);
+    - EV code signing (дороже, быстрее репутация в SmartScreen);
+    - Azure Trusted Signing (подписка, без аппаратного токена);
+    - SignPath Foundation (бесплатно для open-source после проверки).
+
+Подписывать нужно ДО упаковки в ZIP, иначе хеши в SHA256SUMS.txt изменятся.
+Пример:
+
+    signtool sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 `
+        /f certificate.pfx /p <пароль> NetGuardian.exe
+    signtool verify /pa /v NetGuardian.exe
+
+После подписи обновите SHA256SUMS.txt.
+
+================================================================================
+ Конец документа.
+================================================================================

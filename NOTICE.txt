@@ -1,0 +1,63 @@
+﻿================================================================================
+ NETGUARDIAN 3.1
+ Copyright and third-party notices
+================================================================================
+
+NetGuardian 3.1
+Copyright (c) 2026 Svetliak
+
+This project is distributed under the MIT License. The full license text is in
+the LICENSE file. The original author is Svetliak; the project name and the
+original source files are the author's work.
+
+If you publish, redistribute or build on this project, keep the copyright
+notice and the LICENSE file. The MIT License permits commercial use,
+modification and redistribution, provided that the copyright notice and
+permission notice are included.
+
+THIRD-PARTY COMPONENTS
+
+1. Python runtime
+   Copyright (c) Python Software Foundation.
+   License: PSF License Agreement.
+   The Python runtime is bundled inside the single-file EXE and inside the
+   portable _internal folder. The license text is available at:
+       https://docs.python.org/3/license.html
+
+2. PyInstaller
+   Copyright (c) PyInstaller Development Team.
+   License: GPL 2.0 with a special exception that allows building and
+   distributing proprietary applications. PyInstaller is a build tool and is
+   not part of the application logic. License information:
+       https://pyinstaller.org/en/stable/license.html
+
+3. TCPView
+   Copyright (c) Microsoft Corporation.
+   TCPView is not bundled with NetGuardian. It is downloaded from Microsoft
+   Sysinternals only when the user explicitly chooses menu item [5], and it
+   remains subject to Microsoft's own license terms:
+       https://learn.microsoft.com/en-us/sysinternals/downloads/tcpview
+
+4. Pillow
+   Copyright (c) the Pillow contributors.
+   License: HPND. Pillow is used only to regenerate the application icon at
+   build time and is not bundled with the application.
+
+TRADEMARKS
+
+Windows and Microsoft are trademarks of Microsoft Corporation. GitHub is a
+trademark of GitHub, Inc. GitLab is a trademark of GitLab B.V. Other names may
+be trademarks of their respective owners.
+
+NetGuardian is not affiliated with, endorsed by or sponsored by Microsoft,
+GitHub or GitLab.
+
+NO WARRANTY
+
+The software is provided "as is", without warranty of any kind, as stated in
+the MIT License. The author is not liable for any damage caused by changes to
+the hosts file or by the use of this software.
+
+================================================================================
+ End of notice.
+================================================================================

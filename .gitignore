@@ -1,0 +1,55 @@
+# --- Python -----------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+env/
+
+# --- PyInstaller / build ----------------------------------------------------
+*.spec.bak
+*.manifest
+
+# --- NetGuardian runtime data ----------------------------------------------
+logs/
+backups/
+cache_ips.json
+*.log
+*.bak
+.testtmp/
+.tmp/
+.smoke/
+.probe/
+.buildtmp/
+.smoketmp/
+.signing/
+.repack/
+.sign-tmp/
+.tools*/
+.tools-zig*
+.nuitka-*/
+.nuitka-cache/
+.nuitka-tmp/
+dist-native/
+.native-test/
+nuitka-crash-report.xml
+
+# --- tooling ----------------------------------------------------------------
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.idea/
+.vscode/
+Thumbs.db
+desktop.ini
+
+# приватное, не для публикации
+.signing/
+cache_ips.json
+*.pfx
+*.cer

@@ -1,0 +1,59 @@
+﻿================================================================================
+ NETGUARDIAN 3.1.1
+ Native build (Nuitka)
+================================================================================
+
+WHAT THIS IS
+
+This distribution is built with Nuitka, not PyInstaller. The Python package is
+translated to C, compiled by a native compiler and linked into NetGuardian.exe.
+The result contains no PYZ archive and no Python bytecode that can be extracted
+with tools such as pyi-archive_viewer or pyinstxtractor.
+
+Files:
+  NetGuardian.exe     native executable
+  *.dll / *.pyd       Python runtime and extension modules
+  run.cmd             launcher that keeps the window open on errors
+  README*.txt/md      user documentation
+  docs\               project, architecture, release and audit documents
+  NATIVE-BUILD.txt    this file
+
+HOW IT WAS BUILT
+
+  python -m pip install nuitka
+  .\build-native.ps1 -Compiler zig
+
+The build script also supports -Compiler msvc (Visual Studio C++ Build Tools),
+-Compiler mingw64 (Nuitka downloads MinGW64), and -Compiler auto.
+
+WHAT IT PROTECTS
+
+  - removes the trivial "extract the PyInstaller archive" step;
+  - source modules are compiled to machine code, not shipped as .pyc/PYZ;
+  - strings and logic are harder to inspect than Python bytecode;
+  - raises the effort needed for a casual copy or modification.
+
+WHAT IT DOES NOT PROTECT
+
+  - the folder and the executable can still be copied and run;
+  - this is not a license or activation system;
+  - a determined attacker can reverse engineer native code or patch checks;
+  - no client-side protection is absolute. If the code runs on the user's
+    machine, it can be analysed.
+
+If the goal is to prevent unauthorised *use* (not just source extraction), a
+license/activation layer is required: a signed license file bound to a machine,
+an online activation server, or moving the valuable logic to a server. Native
+compilation alone does not do that.
+
+RUNNING
+
+  Right-click run.cmd -> "Run as administrator", or start NetGuardian.exe.
+  Windows 10/11 x64. Administrator rights are required to edit the hosts file.
+
+The executable is not signed with a commercial certificate. Windows SmartScreen
+may warn you; compare the SHA256 in the release folder.
+
+================================================================================
+ End of document.
+================================================================================
