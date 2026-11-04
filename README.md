@@ -17,12 +17,6 @@ new route fails.
 > `cleanup`, `prune`, `status`, `diag`, `backups`, `tcpview`, `config`, `lang`, plus an
 > interactive menu. Python 3.9+ or the single-file `NetGuardian.exe`.
 
-
-> **Статус репозитория:** исходный код — **3.1.2** (118 автотестов, проходят).
-> Последний собранный релизный комплект — **3.1.1**; его состав и имена архивов
-> описаны в [`docs/RELEASE.txt`](docs/RELEASE.txt). Документация в `docs/`
-> относится к релизу 3.1.1 и обновляется по мере подготовки 3.1.2.
-
 ---
 
 ## Содержание
@@ -76,7 +70,7 @@ new route fails.
   `raw.githubusercontent.com` — 185.199.108–111.133,
   `codeload.github.com` — 140.82.121.9, `gitlab.com` — 172.65.251.78,
   `registry.gitlab.com` — 35.227.35.254.
-- 118 тестов (добавлены проверки `domain_candidates`, приоритета адресов
+- 108 тестов (добавлены проверки `domain_candidates`, приоритета адресов
   и разбора subject сертификата в `test_security.py`).
 - Релизный комплект `NetGuardian-3.1.1-release`.
 
@@ -123,7 +117,7 @@ new route fails.
 3. Проверьте результат пунктом `[3]` (TLS-проверка) или `[7]` (состояние).
 
 При первом запуске рядом с EXE создаётся `routes.json` с тремя профилями:
-`microsoft_fix`, `game_updates`, `github_access`.
+`microsoft_fix`, `github_access`, `gitlab_access`.
 
 ### Один файл
 
@@ -411,7 +405,7 @@ NetGuardian не удаляет чужие строки автоматическ
 ## Сборка из исходников
 
 ```powershell
-python -m unittest discover -s tests -t .   # 118 тестов, без сети и администратора
+python -m unittest discover -s tests -t .   # 108 тестов, без сети и администратора
 .\build.ps1                                  # тесты + dist\NetGuardian.exe + SHA256
 ```
 

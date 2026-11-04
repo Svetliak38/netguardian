@@ -1,5 +1,5 @@
 ================================================================================
- NETGUARDIAN 3.1.2
+ NETGUARDIAN 3.1.3
  Подпись и снятие метки "скачано из Интернета"
 ================================================================================
 
@@ -14,7 +14,7 @@
 
 Эквивалент в PowerShell:
 
-    Get-ChildItem -LiteralPath "C:\путь\к\NetGuardian-3.1.2-release" -Recurse -File |
+    Get-ChildItem -LiteralPath "C:\путь\к\NetGuardian-3.1.1-release" -Recurse -File |
         Unblock-File
 
 
@@ -36,8 +36,8 @@
 
 Проверка:
 
-    Get-AuthenticodeSignature "C:\Tools\NetGuardian-3.1.2-release\NetGuardian.exe"
-    signtool verify /pa /v "C:\Tools\NetGuardian-3.1.2-release\NetGuardian.exe"
+    Get-AuthenticodeSignature "C:\MyWorkspase\NetGuardian-3.1.1-release\NetGuardian.exe"
+    signtool verify /pa /v "C:\MyWorkspase\NetGuardian-3.1.1-release\NetGuardian.exe"
 
 Ожидается Status = Valid, Signer = CN=Svetliak.
 

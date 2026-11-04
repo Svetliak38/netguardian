@@ -104,7 +104,7 @@ NetGuardian решает узкую задачу: домен резолвитс�
       ui.py            консоль, цвета, таблицы, ввод
 
     guardian.py        тонкая точка входа (совместима с v2.3)
-    tests/             118 тестов unittest
+    tests/             108 тестов unittest
     packaging/         version_info.txt, run.cmd, make_icon.py
     assets/            netguardian.ico, netguardian.png
     docs/              REVIEW.md, HOW-IT-WORKS.txt, RELEASE.txt
@@ -614,7 +614,7 @@ ok/error/hint, а не только текстом.
 17. ТЕСТЫ
 --------------------------------------------------------------------------------
 
-tests/ — 118 тестов на стандартном unittest, без сети и без администратора.
+tests/ — 108 тестов на стандартном unittest, без сети и без администратора.
 
   test_hosts.py     блоки, конфликты, кодировки, CRLF, backup/restore,
                     атомарность через проверку содержимого, ошибки маркеров

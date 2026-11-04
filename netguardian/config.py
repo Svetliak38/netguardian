@@ -18,6 +18,15 @@ from . import i18n
 from .errors import ConfigError
 from .fsutil import atomic_write_text
 from .log import get_logger
+from .sslcheck import PIN_MODES
+
+
+def _as_pin_mode(value: Any) -> str:
+    """Reject a typo instead of silently falling back to strict."""
+    mode = str(value).strip().lower()
+    if mode not in PIN_MODES:
+        raise ValueError(f"pin_mode must be one of {', '.join(PIN_MODES)}, got {value!r}")
+    return mode
 
 STRATEGIES = ("static_first", "dns_discovery_only", "static_only", "system_dns")
 DEFAULT_PORTS = (443,)
@@ -31,6 +40,7 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
     "cache_ttl_hours": 6,
     "backup_keep": 10,
     "verify_after_apply": True,
+    "pin_mode": "strict",
     "stuck_states": list(STUCK_STATES_DEFAULT),
 }
 
@@ -191,6 +201,7 @@ class Settings:
     cache_ttl_hours: float = 6.0
     backup_keep: int = 10
     verify_after_apply: bool = True
+    pin_mode: str = "strict"
     stuck_states: List[str] = field(default_factory=lambda: list(STUCK_STATES_DEFAULT))
 
 
@@ -245,6 +256,7 @@ class Config:
                 "cache_ttl_hours": self.settings.cache_ttl_hours,
                 "backup_keep": self.settings.backup_keep,
                 "verify_after_apply": self.settings.verify_after_apply,
+                "pin_mode": self.settings.pin_mode,
                 "stuck_states": list(self.settings.stuck_states),
             }
         )
@@ -312,6 +324,7 @@ def _parse_settings(raw: Any, path: Path, warnings: List[str]) -> Tuple[Settings
             cache_ttl_hours=_as_float(merged["cache_ttl_hours"], "cache_ttl_hours", 0, 720),
             backup_keep=_as_int(merged["backup_keep"], "backup_keep", 1, 100),
             verify_after_apply=_as_bool(merged["verify_after_apply"], "verify_after_apply"),
+            pin_mode=_as_pin_mode(merged["pin_mode"]),
             stuck_states=[str(s).strip().upper() for s in _as_string_list(merged["stuck_states"], "stuck_states")]
             or list(STUCK_STATES_DEFAULT),
         )

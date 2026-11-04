@@ -34,6 +34,49 @@ try {
     $version = $versionMatch.Matches[0].Groups[1].Value
     Write-Host "      version: $version (netguardian\__init__.py)"
 
+    # Свойства exe (FileVersion/ProductVersion) берутся из того же __version__,
+    # иначе они расходятся с `--version`. Так и вышло в 3.1.3: внутри 3.1.3,
+    # а в свойствах файла осталось 3.1.1, потому что version_info.txt правили руками.
+    $viParts = @($version.Split('.') | ForEach-Object { [int]$_ })
+    while ($viParts.Count -lt 4) { $viParts += 0 }
+    $viTuple = ($viParts[0..3] -join ', ')
+    $viText = @"
+VSVersionInfo(
+  ffi=FixedFileInfo(
+    filevers=($viTuple),
+    prodvers=($viTuple),
+    mask=0x3f,
+    flags=0x0,
+    OS=0x40004,
+    fileType=0x1,
+    subtype=0x0,
+    date=(0, 0)
+  ),
+  kids=[
+    StringFileInfo(
+      [
+        StringTable(
+          u'040904B0',
+          [
+            StringStruct(u'CompanyName', u'Svetliak'),
+            StringStruct(u'FileDescription', u'NetGuardian - adaptive route manager'),
+            StringStruct(u'FileVersion', u'$version.0'),
+            StringStruct(u'InternalName', u'NetGuardian'),
+            StringStruct(u'LegalCopyright', u'Copyright (c) 2026 Svetliak. MIT License.'),
+            StringStruct(u'OriginalFilename', u'NetGuardian.exe'),
+            StringStruct(u'ProductName', u'NetGuardian'),
+            StringStruct(u'ProductVersion', u'$version.0')
+          ]
+        )
+      ]
+    ),
+    VarFileInfo([VarStruct(u'Translation', [1033, 1200])])
+  ]
+)
+"@
+    Set-Content -LiteralPath (Join-Path $root "packaging\version_info.txt") -Value $viText -Encoding utf8
+    Write-Host "      version_info.txt: $viTuple"
+
     if (-not $SkipTests) {
         Write-Host "[1/5] Compiling sources..."
         & $Python -m compileall -q netguardian guardian.py
@@ -79,6 +122,14 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "the portable executable failed --version" }
     Write-Host "      portable: $banner"
 
+    # Защита от расхождения: свойства файла обязаны совпадать с --version.
+    $fileVersion = (Get-Item $portableExe).VersionInfo.FileVersion
+    $productVersion = (Get-Item $portableExe).VersionInfo.ProductVersion
+    Write-Host "      FileVersion: $fileVersion, ProductVersion: $productVersion"
+    if (-not $fileVersion.StartsWith($version) -or -not $productVersion.StartsWith($version)) {
+        throw "exe version info ($fileVersion / $productVersion) does not match $version"
+    }
+
     $portableZip = Join-Path $root "dist\NetGuardian-$version-portable-win64.zip"
     $singleZip = Join-Path $root "dist\NetGuardian-$version-singlefile-win64.zip"
     if (Test-Path $portableZip) { Remove-Item $portableZip -Force }
@@ -110,8 +161,8 @@ try {
         "CHANGELOG.md", "LICENSE", "NOTICE.txt", "SIGNING.txt",
         ".gitignore", "pyproject.toml", "requirements-dev.txt", "build.ps1",
         "build-native.ps1", "NATIVE-BUILD.txt",
-        "NetGuardian.spec", "NetGuardian-portable.spec", "routes.json",
-        "netguardian", "tests", "docs", "packaging", "assets", "legacy"
+        "NetGuardian.spec", "NetGuardian-portable.spec",
+        "netguardian", "tests", "docs", "packaging", "assets"
     )
     foreach ($item in $sourceItems) {
         Copy-Item (Join-Path $root $item) $sourceStage -Recurse -Force

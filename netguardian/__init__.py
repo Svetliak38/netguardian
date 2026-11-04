@@ -11,8 +11,8 @@ PyInstaller.
 
 from __future__ import annotations
 
-__version__ = "3.1.2"
-__version_info__ = (3, 1, 2)
+__version__ = "3.1.3"
+__version_info__ = (3, 1, 3)
 __author__ = "Svetliak"
 __license__ = "MIT"
 __url__ = "https://github.com/netguardian/netguardian"

@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import os
+import urllib.error
+import urllib.request
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Sequence, Tuple
 
@@ -18,12 +20,85 @@ VERDICT_DNS = "dns"
 VERDICT_TCP = "tcp"
 VERDICT_TLS = "tls"
 VERDICT_HOSTS = "hosts"
+VERDICT_FLAKY = "flaky"
+VERDICT_WAF = "waf"
 
 ACTION_OK = "ok"
 ACTION_APPLY = "apply"
 ACTION_CLEANUP = "cleanup"
 ACTION_PROXY = "proxy"
 ACTION_NETWORK = "network"
+ACTION_PIN = "pin"
+ACTION_UNPIN = "unpin"
+ACTION_RETRY = "retry"
+
+# Akamai and friends answer 403 to bot-looking agents; a plain "Mozilla/5.0"
+# used to be treated as a successful reachability check.
+BROWSER_UA = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36"
+)
+
+
+@dataclass
+class IpProbe:
+    """One address tried several times: an open TCP port proves nothing."""
+
+    ip: str
+    tcp_ok: bool
+    tls_ok: int
+    tls_fail: int
+    last_error: str = ""
+
+    @property
+    def rate(self) -> float:
+        total = self.tls_ok + self.tls_fail
+        return self.tls_ok / total if total else 0.0
+
+    @property
+    def verdict(self) -> str:
+        if self.rate >= 0.8:
+            return "ok"
+        if self.rate > 0:
+            return "flaky"
+        return "dead"
+
+
+def probe_ips(
+    domain: str,
+    ips: Sequence[str],
+    attempts: int = 3,
+    timeout: float = 6.0,
+    tls_inspector=inspect,
+) -> List[IpProbe]:
+    """Try the TLS handshake *attempts* times per address.
+
+    A host can accept TCP and still never answer the handshake; that is the
+    case this function exists for, so TCP is only recorded, never trusted.
+    """
+    probes: List[IpProbe] = []
+    for ip in ips:
+        try:
+            tcp_ok = tcp_probe(ip, (443,), timeout)
+        except Exception as exc:  # pragma: no cover - defensive
+            probes.append(IpProbe(ip, False, 0, attempts, str(exc)))
+            continue
+        tls_ok = 0
+        tls_fail = 0
+        last_error = ""
+        for _ in range(attempts):
+            try:
+                cert = tls_inspector(domain, ip=ip, timeout=timeout)
+                if cert.verified:
+                    tls_ok += 1
+                else:
+                    tls_fail += 1
+                    last_error = cert.error or "certificate not verified"
+            except Exception as exc:
+                tls_fail += 1
+                last_error = str(exc)
+        probes.append(IpProbe(ip, tcp_ok, tls_ok, tls_fail, last_error))
+    return probes
 
 
 @dataclass
@@ -42,6 +117,8 @@ class DiagnosticReport:
     verdict: str = VERDICT_OK
     action: str = ACTION_OK
     dns_error: str = ""
+    ip_probes: List[IpProbe] = field(default_factory=list)
+    http_status: int = 0
 
     @property
     def working_ips(self) -> List[str]:
@@ -103,6 +180,26 @@ def _hosts_pairs(hosts: HostsFile, domain: str) -> List[Tuple[str, str]]:
     return pairs
 
 
+def http_status(domain: str, timeout: float = 8.0) -> int:
+    """HTTP status of the site root, asked politely.
+
+    Returns 0 when the request itself failed, so a caller can tell
+    "no answer" from "answered 403".
+    """
+    request = urllib.request.Request(
+        f"https://{domain}/",
+        headers={"User-Agent": BROWSER_UA},
+        method="GET",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            return int(response.status)
+    except urllib.error.HTTPError as exc:
+        return int(exc.code)
+    except Exception:
+        return 0
+
+
 def run(
     raw_domain: str,
     config: Config,
@@ -112,6 +209,7 @@ def run(
     tls_inspector=inspect,
     proxy_reader=system_proxy,
     admin: Optional[bool] = None,
+    http_probe=http_status,
 ) -> DiagnosticReport:
     domain = normalize_domain(raw_domain)
     report = DiagnosticReport(domain=domain)
@@ -149,11 +247,19 @@ def run(
         )
 
     working = report.working_ips
+    tls_timeout = max(5.0, config.settings.tcp_timeout_sec)
     if working:
         report.cert = tls_inspector(
             domain,
             ip=working[0],
-            timeout=max(5.0, config.settings.tcp_timeout_sec),
+            timeout=tls_timeout,
+        )
+        # Only TCP-open addresses are worth the repeated handshake.
+        report.ip_probes = probe_ips(
+            domain,
+            working,
+            timeout=tls_timeout,
+            tls_inspector=tls_inspector,
         )
 
     hosts_ips = [ip for ip, _ in report.hosts_pairs]
@@ -161,7 +267,23 @@ def run(
         # A hosts entry points at a dead address while another route works.
         report.hosts_stale = True
 
-    if report.hosts_stale:
+    report.http_status = http_probe(domain)
+
+    if report.http_status in (403, 451):
+        # A live WAF answer is not a broken route: pinning cannot fix it.
+        report.verdict = VERDICT_WAF
+        report.action = ACTION_PROXY
+    elif report.ip_probes and all(probe.verdict == "dead" for probe in report.ip_probes):
+        report.verdict = VERDICT_TLS
+        report.action = (
+            ACTION_PIN if any(probe.tcp_ok for probe in report.ip_probes) else ACTION_NETWORK
+        )
+    elif any(probe.verdict == "flaky" for probe in report.ip_probes) and any(
+        probe.verdict == "ok" for probe in report.ip_probes
+    ):
+        report.verdict = VERDICT_FLAKY
+        report.action = ACTION_PIN
+    elif report.hosts_stale:
         report.verdict = VERDICT_HOSTS
         report.action = ACTION_CLEANUP
     elif not candidates:
@@ -199,6 +321,15 @@ def render(report: DiagnosticReport) -> None:
     for ip, port, ok in report.tcp_results:
         state = i18n.t("diag.tcp_ok") if ok else i18n.t("diag.tcp_fail")
         (ui.ok if ok else ui.warn)(i18n.t("diag.tcp", ip=ip, port=port, state=state))
+    for probe in report.ip_probes:
+        line = i18n.t(
+            "diag.probe_line",
+            ip=probe.ip,
+            ok=probe.tls_ok,
+            fail=probe.tls_fail,
+            state=i18n.t(f"diag.probe_{probe.verdict}"),
+        )
+        (ui.ok if probe.verdict == "ok" else ui.warn)(line)
     if report.cert is not None:
         cert = report.cert
         state = i18n.t("diag.tls_ok") if cert.verified else i18n.t("diag.tls_fail")
@@ -220,6 +351,33 @@ def render(report: DiagnosticReport) -> None:
         ui.detail(i18n.t("diag.proxy_off"))
     ui.header(i18n.t("diag.verdict", verdict=i18n.t(f"diag.verdict_{report.verdict}")))
     ui.info(i18n.t("diag.hint", action=i18n.t(f"diag.action_{report.action}")))
+    _render_actions(report)
+
+
+_ACTION_KEYS = {
+    ACTION_OK: "diag.act_ok",
+    ACTION_APPLY: "diag.act_apply",
+    ACTION_CLEANUP: "diag.act_cleanup",
+    ACTION_PROXY: "diag.act_proxy",
+    ACTION_NETWORK: "diag.act_network",
+    ACTION_PIN: "diag.act_pin",
+    ACTION_UNPIN: "diag.act_unpin",
+    ACTION_RETRY: "diag.act_retry",
+}
+
+
+def _render_actions(report: DiagnosticReport) -> None:
+    """Numbered, actionable list instead of a single vague hint."""
+    key = _ACTION_KEYS.get(report.action, "diag.act_network")
+    ui.header(i18n.t("diag.actions"))
+    ui.info(f"1. {i18n.t(key)}")
+    hint_key = f"{key}_hint"
+    hint = i18n.t(hint_key)
+    if hint != hint_key:
+        ui.detail(hint)
+    if report.verdict == VERDICT_FLAKY and report.ip_probes:
+        best = max(report.ip_probes, key=lambda probe: probe.rate)
+        ui.detail(i18n.t("diag.best_ip", ip=best.ip, rate=f"{best.rate:.0%}"))
 
 
 __all__ = [
@@ -227,14 +385,22 @@ __all__ = [
     "ACTION_CLEANUP",
     "ACTION_NETWORK",
     "ACTION_OK",
+    "ACTION_PIN",
     "ACTION_PROXY",
+    "ACTION_RETRY",
+    "ACTION_UNPIN",
     "DiagnosticReport",
+    "IpProbe",
     "VERDICT_DNS",
+    "VERDICT_FLAKY",
     "VERDICT_HOSTS",
     "VERDICT_OK",
     "VERDICT_TCP",
     "VERDICT_TLS",
+    "VERDICT_WAF",
     "find_profile_for_domain",
+    "http_status",
+    "probe_ips",
     "render",
     "run",
     "system_proxy",

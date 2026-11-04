@@ -716,10 +716,73 @@ def cmd_diag(ctx: Context, args: argparse.Namespace) -> int:
                 else None,
                 "proxy": report.proxy,
                 "profile": report.profile,
+                "http_status": report.http_status,
+                "ip_probes": [
+                    {
+                        "ip": probe.ip,
+                        "tcp_open": probe.tcp_ok,
+                        "tls_ok": probe.tls_ok,
+                        "tls_fail": probe.tls_fail,
+                        "verdict": probe.verdict,
+                        "error": probe.last_error,
+                    }
+                    for probe in report.ip_probes
+                ],
             }
         )
         return EXIT_OK if report.verdict == "ok" else EXIT_ERROR
     render_diagnostic(report)
+    if ctx.interactive and report.ip_probes:
+        _offer_pin(ctx, report)
+    return EXIT_OK if report.verdict == "ok" else EXIT_ERROR
+
+
+def _offer_pin(ctx: Context, report: DiagnosticReport) -> None:
+    """Offer to pin the address that actually answers, never a dead one."""
+    best = max(report.ip_probes, key=lambda probe: probe.rate)
+    if best.rate <= 0:
+        return
+    mode = ctx.config.settings.pin_mode
+    if mode != "strict":
+        ui.warn(i18n.t(f"pin.warn_{mode}"))
+    if not ui.confirm(
+        i18n.t("diag.pin_offer", ip=best.ip, domain=report.domain, mode=mode), default=False
+    ):
+        return
+    ok, message = ctx.hosts.pin(report.domain, best.ip, mode=mode)
+    (ui.ok if ok else ui.err)(message)
+
+
+def cmd_probe(ctx: Context, args: argparse.Namespace) -> int:
+    """Full probe: every address, repeated handshakes, and hung sockets."""
+    domain = getattr(args, "domain", None)
+    if not domain:
+        raise ConfigError(i18n.t("diag.prompt"))
+    try:
+        report = run_diagnostic(domain, ctx.config, ctx.hosts)
+    except ValueError as exc:
+        raise ConfigError(str(exc)) from exc
+
+    render_diagnostic(report)
+
+    addresses = {probe.ip for probe in report.ip_probes}
+    if addresses:
+        try:
+            stuck = find_stuck()
+        except RuntimeError as exc:
+            ui.warn(i18n.t("scan.failed", error=exc))
+            return EXIT_ERROR
+        related = [item for item in stuck if item.connection.remote_ip in addresses]
+        if related:
+            ui.header(i18n.t("probe.stuck"))
+            ui.table(
+                ["PID", "PROCESS", "STATE", "REMOTE", "REASON"],
+                [
+                    [item.pid, item.process or "?", item.state, item.remote, item.reason]
+                    for item in related
+                ],
+            )
+    # The exit code stays tied to the route verdict, not to hung sockets.
     return EXIT_OK if report.verdict == "ok" else EXIT_ERROR
 
 
@@ -1081,6 +1144,12 @@ def build_parser() -> argparse.ArgumentParser:
     diag = subparsers.add_parser("diag", parents=[common], help="diagnose a connection problem")
     diag.add_argument("domain", nargs="?", help="domain or URL to test")
     diag.set_defaults(func=cmd_diag)
+
+    probe = subparsers.add_parser(
+        "probe", parents=[common], help="full probe: every address, repeated handshakes"
+    )
+    probe.add_argument("domain", nargs="?", help="domain or URL to test")
+    probe.set_defaults(func=cmd_probe)
 
     status = subparsers.add_parser("status", parents=[common], help="show active fixes and cache")
     status.set_defaults(func=cmd_status)

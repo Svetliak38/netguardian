@@ -1,7 +1,7 @@
 VSVersionInfo(
   ffi=FixedFileInfo(
-    filevers=(3, 1, 1, 0),
-    prodvers=(3, 1, 1, 0),
+    filevers=(3, 1, 3, 0),
+    prodvers=(3, 1, 3, 0),
     mask=0x3f,
     flags=0x0,
     OS=0x40004,
@@ -17,12 +17,12 @@ VSVersionInfo(
           [
             StringStruct(u'CompanyName', u'Svetliak'),
             StringStruct(u'FileDescription', u'NetGuardian - adaptive route manager'),
-            StringStruct(u'FileVersion', u'3.1.1.0'),
+            StringStruct(u'FileVersion', u'3.1.3.0'),
             StringStruct(u'InternalName', u'NetGuardian'),
             StringStruct(u'LegalCopyright', u'Copyright (c) 2026 Svetliak. MIT License.'),
             StringStruct(u'OriginalFilename', u'NetGuardian.exe'),
             StringStruct(u'ProductName', u'NetGuardian'),
-            StringStruct(u'ProductVersion', u'3.1.1.0')
+            StringStruct(u'ProductVersion', u'3.1.3.0')
           ]
         )
       ]

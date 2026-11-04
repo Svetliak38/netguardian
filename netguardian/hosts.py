@@ -28,6 +28,14 @@ from .errors import AdminRequiredError, HostsError, HostsPermissionError, HostsS
 from .fsutil import atomic_write_bytes, rotate_files
 from .log import get_logger
 from .security import is_admin
+from .sslcheck import inspect
+
+PIN_PROFILE_PREFIX = "pin:"
+
+
+def pin_profile(domain: str) -> str:
+    """Block name used for an ad-hoc pin of *domain*."""
+    return f"{PIN_PROFILE_PREFIX}{domain.strip().lower().rstrip('.')}"
 
 MARKER_RE = re.compile(
     r"^\s*#\s*=+\s*NETGUARDIAN\s+FIX\s*\((?P<profile>[^)]*)\)\s*"
@@ -447,6 +455,54 @@ class HostsFile:
         if actual != mapping:
             raise HostsError(i18n.t("error.hosts_write", path=self.path, error="verification failed"))
 
+    # -- ad-hoc pins -------------------------------------------------------
+    def pin(
+        self,
+        domain: str,
+        ip: str,
+        *,
+        mode: str = "strict",
+        inspector=inspect,
+    ) -> Tuple[bool, str]:
+        """Pin *domain* to *ip* after the certificate check that *mode* demands."""
+        name = domain.strip().lower().rstrip(".")
+        if not name:
+            return False, i18n.t("pin.bad_domain")
+        info = inspector(name, ip=ip, mode=mode)
+        if not info.acceptable:
+            return False, i18n.t("pin.refused", domain=name, ip=ip, error=info.error or "")
+        try:
+            result = self.apply(pin_profile(name), {name: ip})
+        except (AdminRequiredError, HostsPermissionError, HostsError) as exc:
+            return False, str(exc)
+        if result.conflicts:
+            return False, i18n.t("pin.conflict", detail="; ".join(result.conflicts))
+        if result.written:
+            return True, i18n.t("pin.done", domain=name, ip=ip, mode=mode)
+        return True, i18n.t("pin.unchanged", domain=name, ip=ip)
+
+    def unpin(self, domain: str) -> Tuple[bool, str]:
+        name = domain.strip().lower().rstrip(".")
+        if not name:
+            return False, i18n.t("pin.bad_domain")
+        try:
+            removed = self.remove(pin_profile(name))
+        except (AdminRequiredError, HostsPermissionError, HostsError) as exc:
+            return False, str(exc)
+        if removed > 0:
+            return True, i18n.t("pin.removed", domain=name)
+        return False, i18n.t("pin.nothing", domain=name)
+
+    def pinned_for(self, domain: str) -> List[str]:
+        """Every address currently bound to *domain*, in file order."""
+        name = domain.strip().lower().rstrip(".")
+        addresses: List[str] = []
+        for block in self.blocks():
+            for ip, entry in block.entries:
+                if entry == name and ip not in addresses:
+                    addresses.append(ip)
+        return addresses
+
 
 __all__ = [
     "ApplyResult",
@@ -455,7 +511,9 @@ __all__ = [
     "HostsDocument",
     "HostsFile",
     "MARKER_RE",
+    "PIN_PROFILE_PREFIX",
     "load_document",
     "parse_blocks",
+    "pin_profile",
     "render_block",
 ]

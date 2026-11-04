@@ -4,7 +4,7 @@
  Руководство пользователя
 ================================================================================
 
-Версия:      3.1.1
+Версия:      3.1.3
 Лицензия:    MIT
 Автор идеи:  Svetliak
 Документ:    README.txt (для пользователей и первых запусков)
@@ -106,7 +106,6 @@ apply, cleanup, restore. Команды scan, status, validate, diag, config
 конфигурация с четырьмя профилями:
 
     microsoft_fix   — Microsoft Edge / Windows Update
-    game_updates     — игровой сервис (патчи и ресурсы)
     github_access   — GitHub (web, API, raw, gist, codeload)
     gitlab_access   — GitLab (web и registry)
 

@@ -4,7 +4,7 @@
  User guide (English)
 ================================================================================
 
-Version:      3.1.1
+Version:      3.1.3
 License:      MIT
 Author:       Svetliak
 Document:     README.en.txt
@@ -81,7 +81,7 @@ the TEMP directory is restricted.
 
 3) On first start NetGuardian creates routes.json next to the executable with
    four profiles:
-       microsoft_fix, game_updates, github_access, gitlab_access
+       microsoft_fix, github_access, gitlab_access
 
 IMPORTANT: do not move NetGuardian.exe away from the _internal folder.
 The portable build consists of both.
@@ -452,7 +452,7 @@ itself the same way.
 
 From source:
 
-    python -m unittest discover -s tests -t .   # 118 tests, no network, no admin
+    python -m unittest discover -s tests -t .   # 108 tests, no network, no admin
     .\build.ps1                                  # builds both variants and ZIPs
 
 Requirements for building: Python 3.9+, PyInstaller 6+, Pillow (icon only).

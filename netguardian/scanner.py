@@ -8,10 +8,14 @@ import ipaddress
 import os
 import re
 import subprocess
+import time
 from dataclasses import dataclass, field
-from typing import Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple
 
 CREATE_NO_WINDOW = 0x08000000 if os.name == "nt" else 0
+
+#: States that already mean "this connection is not moving on its own".
+DEFAULT_STUCK_STATES = ("SYN_SENT", "CLOSE_WAIT", "FIN_WAIT_1", "LAST_ACK")
 
 
 @dataclass
@@ -32,6 +36,35 @@ class Connection:
     @property
     def local(self) -> str:
         return f"{self.local_ip}:{self.local_port}"
+
+
+@dataclass
+class StuckConnection:
+    """A connection worth showing to the user, with the reason why."""
+
+    connection: Connection
+    reason: str  # "persistent" | "pileup" | "state"
+    seen_sec: float
+
+    @property
+    def pid(self) -> int:
+        return self.connection.pid
+
+    @property
+    def process(self) -> str:
+        return self.connection.process
+
+    @property
+    def state(self) -> str:
+        return self.connection.state
+
+    @property
+    def local(self) -> str:
+        return self.connection.local
+
+    @property
+    def remote(self) -> str:
+        return self.connection.remote
 
 
 def split_address(token: str) -> Tuple[str, int]:
@@ -146,24 +179,95 @@ def _is_routable(address: str) -> bool:
     return not (ip.is_loopback or ip.is_unspecified or ip.is_multicast)
 
 
+def snapshot(interval_sec: float = 3.0) -> Tuple[List[Connection], List[Connection]]:
+    """Two connection table snapshots with a pause in between."""
+    first = list_connections()
+    time.sleep(interval_sec)
+    second = list_connections()
+    return first, second
+
+
 def find_stuck(
-    connections: Iterable[Connection],
+    first: Optional[Sequence[Connection]] = None,
     hints: Sequence[str] = (),
-    states: Sequence[str] = ("SYN_SENT", "CLOSE_WAIT"),
-) -> List[Connection]:
+    states: Sequence[str] = DEFAULT_STUCK_STATES,
+    *,
+    interval_sec: float = 3.0,
+    pileup_threshold: int = 6,
+    second: Optional[Sequence[Connection]] = None,
+) -> List[StuckConnection]:
+    """Find stuck connections by comparing two snapshots.
+
+    A connection is reported once, with ``persistent`` winning over ``pileup``
+    and ``pileup`` over ``state``. When *second* is omitted, the second
+    snapshot is taken live after *interval_sec*.
+    """
+    if first is None:
+        first, second = snapshot(interval_sec)
+    elif second is None:
+        time.sleep(interval_sec)
+        second = list_connections()
+
     wanted_states = {state.upper() for state in states}
     lowered_hints = [hint.lower() for hint in hints if hint]
-    result: List[Connection] = []
-    for connection in connections:
-        if connection.state not in wanted_states:
-            continue
+
+    def matches(connection: Connection) -> bool:
+        # PID 0 rows are kernel placeholders: nothing for the user to fix.
+        if connection.pid == 0:
+            return False
         if not _is_routable(connection.remote_ip):
+            return False
+        if not lowered_hints:
+            return True
+        name = (connection.process or "").lower()
+        return any(hint in name for hint in lowered_hints)
+
+    def key_of(connection: Connection) -> Tuple[str, str, int, str, int]:
+        return (
+            connection.proto,
+            connection.local_ip,
+            connection.local_port,
+            connection.remote_ip,
+            connection.remote_port,
+        )
+
+    first_states = {key_of(connection): connection.state for connection in first}
+    result: List[StuckConnection] = []
+    seen: set = set()
+
+    for connection in second:
+        if not matches(connection):
             continue
-        if lowered_hints:
-            name = (connection.process or "").lower()
-            if not any(hint in name for hint in lowered_hints):
+        key = key_of(connection)
+        if key in seen:
+            continue
+        if connection.state not in wanted_states:
+            # TIME_WAIT and friends are normal shutdown, not a stuck socket.
+            continue
+        if first_states.get(key) == connection.state:
+            result.append(StuckConnection(connection, "persistent", interval_sec))
+        else:
+            result.append(StuckConnection(connection, "state", 0.0))
+        seen.add(key)
+
+    groups: Dict[Tuple[int, str], List[Connection]] = {}
+    for connection in second:
+        if connection.state != "ESTABLISHED" or connection.remote_port != 443:
+            continue
+        if not matches(connection):
+            continue
+        groups.setdefault((connection.pid, connection.remote_ip), []).append(connection)
+
+    for connections in groups.values():
+        if len(connections) < pileup_threshold:
+            continue
+        for connection in connections:
+            key = key_of(connection)
+            if key in seen:
                 continue
-        result.append(connection)
+            result.append(StuckConnection(connection, "pileup", 0.0))
+            seen.add(key)
+
     result.sort(key=lambda item: (item.process.lower(), item.pid))
     return result
 
@@ -181,10 +285,13 @@ def match_profile(process_name: str, profiles: Dict[str, Sequence[str]]) -> Opti
 __all__ = [
     "Connection",
     "CREATE_NO_WINDOW",
+    "DEFAULT_STUCK_STATES",
+    "StuckConnection",
     "find_stuck",
     "list_connections",
     "match_profile",
     "parse_netstat",
     "parse_tasklist",
+    "snapshot",
     "split_address",
 ]

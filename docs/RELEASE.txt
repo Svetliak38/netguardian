@@ -248,7 +248,7 @@
 
   [ ] Версия в netguardian/__init__.py, pyproject.toml и
       packaging/version_info.txt совпадает (3.1.1).
-  [ ] python -m unittest discover -s tests -t . — 118 тестов, OK.
+  [ ] python -m unittest discover -s tests -t . — 108 тестов, OK.
   [ ] build.ps1 завершился без ошибок.
   [ ] Портативный exe запускается и печатает версию.
   [ ] config --check не находит ошибок.

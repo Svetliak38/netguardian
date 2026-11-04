@@ -81,28 +81,76 @@ class TasklistTests(unittest.TestCase):
         self.assertNotIn("abc", mapping)
 
 
-class StuckFilterTests(unittest.TestCase):
-    def setUp(self) -> None:
-        self.connections = [
-            Connection("TCP", "10.0.0.1", 1000, "93.184.216.34", 443, "SYN_SENT", 10, "game.exe"),
-            Connection("TCP", "10.0.0.1", 1001, "93.184.216.35", 443, "ESTABLISHED", 10, "game.exe"),
-            Connection("TCP", "10.0.0.1", 1002, "93.184.216.36", 443, "CLOSE_WAIT", 11, "other.exe"),
-            Connection("TCP", "127.0.0.1", 1003, "127.0.0.1", 1004, "CLOSE_WAIT", 12, "loop.exe"),
-            Connection("TCP", "10.0.0.1", 1005, "203.0.113.7", 80, "FIN_WAIT2", 13, "game.exe"),
+def _conn(
+    local_port: int,
+    remote_ip: str,
+    state: str,
+    pid: int,
+    name: str,
+    remote_port: int = 443,
+    local_ip: str = "10.0.0.1",
+) -> Connection:
+    return Connection("TCP", local_ip, local_port, remote_ip, remote_port, state, pid, name)
+
+
+class FindStuckTests(unittest.TestCase):
+    def test_persistent_connection_is_reported(self) -> None:
+        first = [_conn(1000, "93.184.216.34", "SYN_SENT", 10, "game.exe")]
+        second = [_conn(1000, "93.184.216.34", "SYN_SENT", 10, "game.exe")]
+        stuck = find_stuck(first, ["game"], ("SYN_SENT",), interval_sec=4.0, second=second)
+        self.assertEqual(len(stuck), 1)
+        self.assertEqual(stuck[0].reason, "persistent")
+        self.assertEqual(stuck[0].seen_sec, 4.0)
+
+    def test_state_change_is_not_dropped(self) -> None:
+        first = [_conn(1001, "93.184.216.35", "ESTABLISHED", 10, "game.exe")]
+        second = [_conn(1001, "93.184.216.35", "CLOSE_WAIT", 10, "game.exe")]
+        stuck = find_stuck(first, [], ("CLOSE_WAIT",), second=second)
+        self.assertEqual([item.reason for item in stuck], ["state"])
+
+    def test_pileup_keeps_real_sockets(self) -> None:
+        second = [_conn(2000 + i, "2.22.145.91", "ESTABLISHED", 10, "chrome.exe") for i in range(6)]
+        stuck = find_stuck([], [], second=second, pileup_threshold=6)
+        self.assertEqual(len(stuck), 6)
+        self.assertTrue(all(item.reason == "pileup" for item in stuck))
+        # Пустых адресов быть не должно: каждая запись — реальный сокет.
+        self.assertEqual(stuck[0].local, "10.0.0.1:2000")
+        self.assertEqual(stuck[5].local, "10.0.0.1:2005")
+
+    def test_persistent_wins_over_pileup(self) -> None:
+        rows = [_conn(3000 + i, "2.22.145.91", "ESTABLISHED", 10, "chrome.exe") for i in range(6)]
+        # ESTABLISHED is only a stuck state if the user listed it explicitly.
+        stuck = find_stuck(
+            rows, [], ("ESTABLISHED",), second=rows, pileup_threshold=6
+        )
+        self.assertEqual(len(stuck), 6)
+        self.assertTrue(all(item.reason == "persistent" for item in stuck))
+
+    def test_loopback_and_hints(self) -> None:
+        rows = [
+            _conn(1003, "127.0.0.1", "CLOSE_WAIT", 12, "loop.exe", remote_port=1004, local_ip="127.0.0.1"),
+            _conn(1004, "93.184.216.36", "CLOSE_WAIT", 11, "other.exe"),
         ]
-
-    def test_filters_by_state_and_hint(self) -> None:
-        stuck = find_stuck(self.connections, ["game"], ("SYN_SENT", "FIN_WAIT2"))
-        self.assertEqual([item.pid for item in stuck], [10, 13])
-
-    def test_loopback_is_ignored(self) -> None:
-        stuck = find_stuck(self.connections, [], ("CLOSE_WAIT",))
+        stuck = find_stuck(rows, ["other"], ("CLOSE_WAIT",), second=rows)
         self.assertEqual([item.pid for item in stuck], [11])
 
     def test_state_matching_is_case_insensitive(self) -> None:
-        stuck = find_stuck(self.connections, [], ("syn_sent",))
-        self.assertEqual(len(stuck), 1)
+        rows = [_conn(1000, "93.184.216.34", "SYN_SENT", 10, "game.exe")]
+        self.assertEqual(len(find_stuck(rows, [], ("syn_sent",), second=rows)), 1)
 
+    def test_time_wait_is_not_stuck(self) -> None:
+        rows = [_conn(4000, "95.100.107.143", "TIME_WAIT", 4321, "chrome.exe") for _ in range(3)]
+        self.assertEqual(find_stuck(rows, [], second=rows), [])
+
+    def test_pid_zero_rows_are_ignored(self) -> None:
+        rows = [_conn(4001, "95.100.107.143", "SYN_SENT", 0, "System Idle Process")]
+        self.assertEqual(find_stuck(rows, [], second=rows), [])
+
+    def test_empty_inputs(self) -> None:
+        self.assertEqual(find_stuck([], [], second=[]), [])
+
+
+class MatchProfileTests(unittest.TestCase):
     def test_match_profile(self) -> None:
         profiles = {"game": ["game.exe"], "browser": ["msedge"]}
         self.assertEqual(match_profile("Game.exe", profiles), "game")

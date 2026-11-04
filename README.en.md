@@ -18,12 +18,6 @@ new route fails.
 - Platform: Windows 10/11 x64
 - Runtime: **no external Python dependencies**
 
-
-> **Repository status:** the source code is **3.1.2** (118 unit tests, passing).
-> The last packaged release is **3.1.1**; its contents and archive names are
-> described in [`docs/RELEASE.txt`](docs/RELEASE.txt). Documents under `docs/`
-> describe release 3.1.1 and are updated as 3.1.2 is prepared.
-
 ---
 
 ## Table of contents
@@ -106,7 +100,7 @@ locked-down environments where `%TEMP%` is restricted.
    You can start `NetGuardian.exe` directly, but `run.cmd` keeps the window open
    on errors and gives the process a writable temporary folder.
 3. On first start NetGuardian creates `routes.json` next to the executable with
-   four profiles: `microsoft_fix`, `game_updates`, `github_access`,
+   four profiles: `microsoft_fix`, `github_access`,
    `gitlab_access`.
 
 Do not move `NetGuardian.exe` away from the `_internal` folder. The portable
@@ -380,7 +374,7 @@ Backups in `backups\` remain until you delete them.
 ## Build from source
 
 ```powershell
-python -m unittest discover -s tests -t .   # 118 tests, no network, no admin
+python -m unittest discover -s tests -t .   # 108 tests, no network, no admin
 .\build.ps1                                  # tests + two builds + ZIPs + SHA256
 ```
 
@@ -419,7 +413,7 @@ NetGuardian-3.1/
 │   ├── fsutil.py            atomic file writes
 │   ├── errors.py            exception hierarchy
 │   └── ui.py                console, colours, tables
-├── tests/                   118 unittest tests
+├── tests/                   108 unittest tests
 ├── docs/                    project, architecture, release and audit docs
 ├── packaging/               version info, run.cmd, icon generator
 ├── assets/                  icon
