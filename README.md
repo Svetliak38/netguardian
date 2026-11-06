@@ -1,5 +1,10 @@
 # NetGuardian 3.1
 
+> **Статус: проект закрыт 07.11.2026. Версия 3.1.7 — финальная.**
+> Поддержки, обновлений и обещаний совместимости нет. Лицензия MIT.
+> Это не VPN и не обход DPI: NetGuardian ремонтирует `hosts`/DNS/IP.
+> [Итоговое ревью](docs/FINAL-REVIEW.md) · [Почему закрыт](docs/WHY-ARCHIVED.md)
+
 **Adaptive route manager for Windows.** NetGuardian finds an address that actually
 accepts TCP connections for a host name and pins it in the system `hosts` file,
 so an application stops hanging on `SYN_SENT` / `CLOSE_WAIT` because of a broken
