@@ -188,6 +188,7 @@ def _resolve_profile(ctx: Context, profile: Profile, *, show: bool) -> Tuple[Dic
                 static_candidates=profile.static_candidates,
                 domain_candidates=profile.domain_candidates,
                 ports=tuple(profile.ports),
+                prefer_fastest=True,
             )
             if resolution is None:
                 missing.append(domain)
@@ -196,7 +197,16 @@ def _resolve_profile(ctx: Context, profile: Profile, *, show: bool) -> Tuple[Dic
                 continue
             mapping[domain] = resolution.ip
             if show:
-                ui.detail(i18n.t("apply.domain_ok", domain=domain, ip=resolution.ip, source=resolution.source))
+                rtt = f", {resolution.rtt_ms:.0f} ms" if resolution.rtt_ms is not None else ""
+                ui.detail(
+                    i18n.t(
+                        "apply.domain_ok",
+                        domain=domain,
+                        ip=resolution.ip,
+                        source=resolution.source,
+                        rtt=rtt,
+                    )
+                )
     finally:
         ctx.cache.flush()
     return mapping, missing

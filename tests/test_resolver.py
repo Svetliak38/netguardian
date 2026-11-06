@@ -154,6 +154,40 @@ class ResolverTests(unittest.TestCase):
         self.assertEqual(result.source, "static")
         self.assertEqual(probes, ["1.2.3.4", "5.6.7.8"])
 
+    def test_fastest_candidate_wins_by_rtt(self) -> None:
+        rtts = {"1.2.3.4": 80.0, "5.6.7.8": 20.0}
+        resolver = Resolver(
+            self.settings,
+            self.cache,
+            rtt=lambda ip, ports, timeout: rtts.get(ip),
+        )
+        result = resolver.resolve(
+            "example.com",
+            strategy="static_only",
+            static_candidates=["1.2.3.4", "5.6.7.8"],
+            prefer_fastest=True,
+        )
+        self.assertIsNotNone(result)
+        assert result is not None
+        self.assertEqual(result.ip, "5.6.7.8")
+        self.assertEqual(result.rtt_ms, 20.0)
+        self.assertEqual(result.candidate_rtts["1.2.3.4"], 80.0)
+
+    def test_fastest_mode_returns_none_when_nothing_answers(self) -> None:
+        resolver = Resolver(
+            self.settings,
+            self.cache,
+            rtt=lambda ip, ports, timeout: None,
+        )
+        self.assertIsNone(
+            resolver.resolve(
+                "example.com",
+                strategy="static_only",
+                static_candidates=["1.2.3.4", "5.6.7.8"],
+                prefer_fastest=True,
+            )
+        )
+
     def test_static_first_falls_back_to_dns(self) -> None:
         dns = FakeDns(["9.9.9.9"])
         resolver = Resolver(

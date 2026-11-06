@@ -33,6 +33,8 @@ class Resolution:
     source: str
     elapsed: float = 0.0
     candidates: List[str] = field(default_factory=list)
+    rtt_ms: Optional[float] = None
+    candidate_rtts: Dict[str, float] = field(default_factory=dict)
 
 
 @dataclass
@@ -324,6 +326,39 @@ def tcp_probe(ip: str, ports: Sequence[int] = (443,), timeout: float = 3.0) -> b
     return False
 
 
+def tcp_rtt_ms(
+    ip: str,
+    ports: Sequence[int] = (443,),
+    timeout: float = 3.0,
+    attempts: int = 2,
+) -> Optional[float]:
+    """Median TCP handshake time in milliseconds, or None if unreachable.
+
+    TCP, not ICMP: the route is judged by the port NetGuardian will actually
+    pin.  Two attempts suppress a single unlucky spike without making a whole
+    strategy scan take forever.
+    """
+    samples: List[float] = []
+    for _ in range(max(1, attempts)):
+        for port in ports or (443,):
+            started = time.perf_counter()
+            try:
+                with socket.create_connection((ip, int(port)), timeout=timeout):
+                    samples.append((time.perf_counter() - started) * 1000.0)
+                    break
+            except OSError:
+                continue
+    if not samples:
+        return None
+    samples.sort()
+    middle = len(samples) // 2
+    if len(samples) % 2:
+        value = samples[middle]
+    else:
+        value = (samples[middle - 1] + samples[middle]) / 2.0
+    return round(value, 1)
+
+
 class Resolver:
     """Turns a profile into one reachable IPv4 address."""
 
@@ -334,11 +369,21 @@ class Resolver:
         *,
         dns_client: Optional[DnsClient] = None,
         probe: Optional[Callable[[str, Sequence[int], float], bool]] = None,
+        rtt: Optional[Callable[[str, Sequence[int], float], Optional[float]]] = None,
     ) -> None:
         self.settings = settings
         self.cache = cache
         self.dns = dns_client or DnsClient(settings.dns_timeout_sec)
         self._probe = probe or tcp_probe
+        # Only the real TCP probe gets automatic RTT measurement.  Tests and
+        # callers that inject a boolean probe keep the old first-reachable
+        # behaviour unless they inject ``rtt`` explicitly.
+        if rtt is not None:
+            self._rtt = rtt
+        elif probe is None:
+            self._rtt = tcp_rtt_ms
+        else:
+            self._rtt = None
 
     # -- public ------------------------------------------------------------
     def resolve(
@@ -350,14 +395,57 @@ class Resolver:
         domain_candidates: Optional[Mapping[str, Sequence[str]]] = None,
         ports: Sequence[int] = (443,),
         use_cache: bool = True,
+        prefer_fastest: bool = False,
     ) -> Optional[Resolution]:
         started = time.time()
         try:
-            if use_cache:
+            if use_cache and not prefer_fastest:
                 cached = self._from_cache(domain, ports)
                 if cached is not None:
                     cached.elapsed = time.time() - started
                     return cached
+
+            # Fastest-route mode looks at every source at once: a static
+            # address is not automatically better than a closer DNS edge.
+            if prefer_fastest and self._rtt is not None:
+                ranked = []
+                seen_candidates = set()
+                for source in self._strategy_order(strategy):
+                    if source == "static":
+                        per_domain = (domain_candidates or {}).get(domain)
+                        candidates = list(per_domain) if per_domain else list(static_candidates)
+                    elif source == "dns":
+                        candidates = self._dns_candidates(domain)
+                    else:
+                        try:
+                            candidates = system_lookup(domain)
+                        except DnsError:
+                            candidates = []
+                    source_label = source
+                    if source == "dns":
+                        source_label = f"dns:{self.settings.local_dns or 'system'}"
+                    for candidate in candidates:
+                        if candidate in seen_candidates:
+                            continue
+                        seen_candidates.add(candidate)
+                        measured = self._rtt(candidate, ports, self.settings.tcp_timeout_sec)
+                        if measured is not None:
+                            ranked.append((measured, candidate, source_label))
+                if not ranked:
+                    return None
+                ranked.sort(key=lambda item: (item[0], item[1]))
+                rtt_ms, chosen, source_label = ranked[0]
+                candidate_rtts = {candidate: ms for ms, candidate, _ in ranked}
+                self.cache.put(domain, chosen, source=source_label)
+                return Resolution(
+                    domain=domain,
+                    ip=chosen,
+                    source=source_label,
+                    elapsed=time.time() - started,
+                    candidates=list(seen_candidates),
+                    rtt_ms=rtt_ms,
+                    candidate_rtts=candidate_rtts,
+                )
 
             for source in self._strategy_order(strategy):
                 if source == "static":
@@ -460,4 +548,5 @@ __all__ = [
     "SOURCE_SYSTEM",
     "system_lookup",
     "tcp_probe",
+    "tcp_rtt_ms",
 ]

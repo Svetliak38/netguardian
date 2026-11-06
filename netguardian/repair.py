@@ -177,21 +177,34 @@ def repair_hosts(
                 domain_candidates=domain_candidates,
                 ports=ports,
                 use_cache=False,
+                prefer_fastest=True,
             )
-            if resolution is not None and resolution.ip != old_ip:
-                candidate_ok, candidate_reason = _entry_is_good(
-                    domain,
-                    resolution.ip,
-                    ports,
-                    expected,
-                    config.settings.pin_mode,
-                    timeout,
-                    probe=probe,
-                    tls_inspect=tls_inspect,
+            if resolution is not None:
+                # The fastest TCP candidate may still fail TLS.  Walk the
+                # ranked candidates in RTT order and take the first one that
+                # passes the same TLS checks as the current entry.
+                candidate_rtts = getattr(resolution, "candidate_rtts", {}) or {}
+                ordered = [resolution.ip] + sorted(
+                    candidate_rtts, key=lambda ip: candidate_rtts[ip]
                 )
-                if candidate_ok:
-                    replacement = resolution.ip
-                else:
+                tried = set()
+                for candidate in ordered:
+                    if not candidate or candidate == old_ip or candidate in tried:
+                        continue
+                    tried.add(candidate)
+                    candidate_ok, candidate_reason = _entry_is_good(
+                        domain,
+                        candidate,
+                        ports,
+                        expected,
+                        config.settings.pin_mode,
+                        timeout,
+                        probe=probe,
+                        tls_inspect=tls_inspect,
+                    )
+                    if candidate_ok:
+                        replacement = candidate
+                        break
                     reason = candidate_reason
 
             if replacement:

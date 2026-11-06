@@ -136,5 +136,39 @@ class RepairTests(unittest.TestCase):
         self.assertIn("2.2.2.2 example.com example.org", self.hosts_path.read_text(encoding="utf-8"))
 
 
+    def test_fast_candidate_with_bad_tls_falls_back_to_slower(self) -> None:
+        class RankedResolver:
+            def resolve(self, domain, **kwargs):
+                return SimpleNamespace(
+                    ip="2.2.2.2",
+                    candidate_rtts={"2.2.2.2": 10.0, "3.3.3.3": 50.0},
+                )
+
+        def probe(ip, ports, timeout):
+            return ip in {"2.2.2.2", "3.3.3.3"}
+
+        def tls(domain, *, ip, port=443, timeout=5.0, mode="strict"):
+            good = ip == "3.3.3.3"
+            return SimpleNamespace(
+                acceptable=good,
+                verified=good,
+                issuer="Test CA" if good else "",
+                error="" if good else "TLS failed",
+            )
+
+        self.hosts._admin_check = lambda: True
+        report = repair_hosts(
+            self.hosts,
+            self.config,
+            RankedResolver(),
+            dry_run=False,
+            timeout=0.1,
+            probe=probe,
+            tls_inspect=tls,
+        )
+        self.assertEqual(report.replaced, 1)
+        self.assertEqual(self.block_ip(), "3.3.3.3")
+
+
 if __name__ == "__main__":
     unittest.main()
