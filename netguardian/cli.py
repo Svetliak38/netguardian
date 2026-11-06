@@ -26,6 +26,7 @@ from .hosts import HostsFile
 from .log import setup as setup_logging
 from .log import get_logger
 from .paths import AppPaths
+from .repair import repair_hosts
 from .resolver import Cache, Resolver, tcp_probe
 from .scanner import find_stuck, list_connections, match_profile
 from .security import is_admin, relaunch_elevated
@@ -615,6 +616,115 @@ def cmd_prune(ctx: Context, args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
+def cmd_repair(ctx: Context, args: argparse.Namespace) -> int:
+    """One-button repair: replace dead marked IPs with working ones."""
+    dry_run = bool(getattr(args, "dry_run", False))
+    yes = bool(getattr(args, "yes", False))
+    timeout = float(getattr(args, "timeout", 0) or max(3.0, ctx.config.settings.tcp_timeout_sec))
+
+    report = repair_hosts(
+        ctx.hosts,
+        ctx.config,
+        ctx.resolver(),
+        dry_run=True,
+        timeout=timeout,
+    )
+
+    if ctx.human:
+        ui.header(i18n.t("repair.header"))
+        for action in report.actions:
+            if action.status == "kept":
+                ui.detail(i18n.t("repair.kept", domain=action.domain, ip=action.old_ip))
+            elif action.status == "replaced":
+                ui.ok(i18n.t("repair.replaced", domain=action.domain, old=action.old_ip, new=action.new_ip))
+            elif action.status == "dead":
+                ui.warn(i18n.t("repair.dead", domain=action.domain, ip=action.old_ip, reason=action.reason))
+            else:
+                ui.err(i18n.t("repair.error", domain=action.domain, ip=action.old_ip, reason=action.reason))
+        ui.info(i18n.t("repair.unmanaged", count=report.unmanaged))
+        ui.info(
+            i18n.t(
+                "repair.summary",
+                replaced=report.replaced,
+                dead=report.dead,
+                kept=report.kept,
+                unmanaged=report.unmanaged,
+            )
+        )
+
+    if not report.changed:
+        if ctx.json:
+            _dump(
+                {
+                    "ok": True,
+                    "changed": False,
+                    "replaced": 0,
+                    "dead": report.dead,
+                    "kept": report.kept,
+                    "unmanaged": report.unmanaged,
+                    "actions": [action.__dict__ for action in report.actions],
+                }
+            )
+        elif ctx.human:
+            ui.info(i18n.t("repair.no_change"))
+        return EXIT_OK
+
+    if dry_run:
+        if ctx.json:
+            _dump(
+                {
+                    "ok": True,
+                    "dry_run": True,
+                    "changed": False,
+                    "would_replace": report.replaced,
+                    "dead": report.dead,
+                    "kept": report.kept,
+                    "unmanaged": report.unmanaged,
+                    "actions": [action.__dict__ for action in report.actions],
+                }
+            )
+        elif ctx.human:
+            ui.info(i18n.t("repair.dry_run"))
+        return EXIT_OK
+
+    if not yes and ctx.interactive:
+        if not ui.confirm(i18n.t("repair.confirm", count=report.replaced), default=False):
+            return EXIT_OK
+
+    if not _ensure_admin(ctx, ["repair", "--yes"]):
+        return EXIT_OK
+
+    report = repair_hosts(
+        ctx.hosts,
+        ctx.config,
+        ctx.resolver(),
+        dry_run=False,
+        timeout=timeout,
+    )
+
+    if ctx.json:
+        _dump(
+            {
+                "ok": report.ok,
+                "changed": report.changed,
+                "written": report.written,
+                "replaced": report.replaced,
+                "dead": report.dead,
+                "kept": report.kept,
+                "unmanaged": report.unmanaged,
+                "backup": str(report.backup) if report.backup else None,
+                "actions": [action.__dict__ for action in report.actions],
+            }
+        )
+        return EXIT_OK if report.ok else EXIT_ERROR
+
+    if report.written:
+        ui.ok(i18n.t("repair.done", count=report.replaced))
+        if report.backup:
+            ui.detail(str(report.backup))
+    return EXIT_OK if report.ok else EXIT_ERROR
+
+
 def cmd_validate(ctx: Context, args: argparse.Namespace) -> int:
     name = getattr(args, "profile", None)
     profiles = [ctx.config.profile(name)] if name else list(ctx.config.profiles.values())
@@ -992,6 +1102,7 @@ def cmd_menu(ctx: Context) -> int:
             "menu.apply",
             "menu.validate",
             "menu.cleanup",
+            "menu.repair",
             "menu.tcpview",
             "menu.diag",
             "menu.status",
@@ -1016,6 +1127,8 @@ def cmd_menu(ctx: Context) -> int:
             handler, fake = cmd_validate, argparse.Namespace(profile=None)
         elif command == "4":
             handler, fake = cmd_cleanup, argparse.Namespace(profile=None, all=False, yes=False, dry_run=False)
+        elif command == "R":
+            handler, fake = cmd_repair, argparse.Namespace(yes=False, dry_run=False, timeout=0.0)
         elif command == "5":
             handler, fake = cmd_tcpview, argparse.Namespace(allow_unsigned=False)
         elif command == "6":
@@ -1116,6 +1229,14 @@ def build_parser() -> argparse.ArgumentParser:
     cleanup.add_argument("--yes", action="store_true", help="do not ask for confirmation")
     cleanup.add_argument("--dry-run", action="store_true", help="show what would be removed")
     cleanup.set_defaults(func=cmd_cleanup)
+
+    repair = subparsers.add_parser(
+        "repair", parents=[common], help="check and replace dead pinned addresses"
+    )
+    repair.add_argument("--yes", action="store_true", help="do not ask for confirmation")
+    repair.add_argument("--dry-run", action="store_true", help="show the plan without writing")
+    repair.add_argument("--timeout", type=float, default=0.0, metavar="SEC", help="per-check timeout in seconds")
+    repair.set_defaults(func=cmd_repair)
 
     prune = subparsers.add_parser(
         "prune", parents=[common], help="remove pinned entries whose address is dead or broken"

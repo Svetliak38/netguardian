@@ -99,6 +99,7 @@ VSVersionInfo(
     if (-not (Test-Path $portableExe)) { throw "dist\NetGuardian\NetGuardian.exe was not produced" }
     Copy-Item "packaging\run.cmd" (Join-Path $portableDir "run.cmd") -Force
     Copy-Item "packaging\UNBLOCK.cmd" (Join-Path $portableDir "UNBLOCK.cmd") -Force
+    Copy-Item "packaging\NetGuardian-Repair.cmd" (Join-Path $portableDir "NetGuardian-Repair.cmd") -Force
     Copy-Item "README.md", "README.en.md", "README.en.txt", "CHANGELOG.md", "LICENSE", "NOTICE.txt", "README.txt", "SIGNING.txt" $portableDir -Force
     $portableDocs = Join-Path $portableDir "docs"
     New-Item -ItemType Directory -Force $portableDocs | Out-Null
@@ -116,6 +117,7 @@ VSVersionInfo(
     Copy-Item "docs\PROJECT.txt", "docs\HOW-IT-WORKS.txt", "docs\RELEASE.txt", "docs\REVIEW.md" $distDocs -Force
     Copy-Item "packaging\run.cmd" (Join-Path $root "dist\run.cmd") -Force
     Copy-Item "packaging\UNBLOCK.cmd" (Join-Path $root "dist\UNBLOCK.cmd") -Force
+    Copy-Item "packaging\NetGuardian-Repair.cmd" (Join-Path $root "dist\NetGuardian-Repair.cmd") -Force
 
     Write-Host "[5/5] Smoke test and packaging..."
     $banner = & $portableExe --version

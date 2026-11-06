@@ -14,7 +14,7 @@ new route fails.
 > validates the configuration, discovers addresses through a built-in DNS client,
 > writes reversible marked blocks atomically with backups, verifies pinned routes
 > over TLS and rolls back on failure. Commands: `scan`, `apply`, `validate`,
-> `cleanup`, `prune`, `status`, `diag`, `backups`, `tcpview`, `config`, `lang`, plus an
+> `cleanup`, `prune`, `repair`, `status`, `diag`, `backups`, `tcpview`, `config`, `lang`, plus an
 > interactive menu. Python 3.9+ or the single-file `NetGuardian.exe`.
 
 ---
@@ -151,6 +151,9 @@ python guardian.py config --check
 | `netguardian prune --all --dry-run` | показать записи, чей адрес умер или не даёт TLS |
 | `netguardian prune --all --yes` | убрать такие записи из блоков NetGuardian |
 | `netguardian prune --all --foreign` | ещё и отчёт по чужим строкам `hosts` (не удаляются) |
+| `netguardian repair --dry-run` | проверить блоки NetGuardian и показать план замены мёртвых IP |
+| `netguardian repair --yes` | заменить мёртвые IP только на проверенные TCP+TLS кандидаты |
+| `NetGuardian-Repair.cmd` | то же одной кнопкой от администратора, с бэкапом и отчётом |
 | `netguardian status` | активные блоки, кэш, резервные копии |
 | `netguardian diag DOMAIN` | полная диагностика домена |
 | `netguardian backups` | список копий `hosts` |

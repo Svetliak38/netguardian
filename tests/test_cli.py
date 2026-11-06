@@ -216,5 +216,14 @@ class LanguageTests(CliTestBase):
         self.assertEqual(saved["settings"]["language"], "ru")
 
 
+class RepairTests(CliTestBase):
+    def test_repair_no_blocks_is_a_clean_noop(self) -> None:
+        code, output = self.run_cli("repair", "--dry-run", "--json")
+        self.assertEqual(code, 0)
+        data = json.loads(output)
+        self.assertFalse(data["changed"])
+        self.assertEqual(data["replaced"], 0)
+
+
 if __name__ == "__main__":
     unittest.main()
