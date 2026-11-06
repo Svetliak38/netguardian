@@ -142,7 +142,9 @@ python guardian.py config --check
 | Команда | Назначение |
 |---|---|
 | `netguardian` / `netguardian menu` | интерактивное меню |
-| `netguardian scan` | найти зависшие TCP-соединения и предложить профиль |
+| `netguardian scan` | найти зависшие TCP-соединения и `ESTABLISHED` без I/O | 
+| `netguardian scan --stalled-wait 20` | дольше наблюдать за замершим `ESTABLISHED` (по умолчанию 12 с) | 
+| `netguardian scan --stalled-process GameClient` | добавить свой процесс в проверку `stalled` |
 | `netguardian apply NAME` | найти адреса, выбрать лучший по TCP RTT и применить профиль |
 | `netguardian apply NAME --dry-run` | показать план, ничего не записывая |
 | `netguardian validate [NAME]` | проверить закреплённые маршруты по TLS |

@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import csv
+import ctypes
 import io
 import ipaddress
 import os
 import re
 import subprocess
 import time
+from ctypes import wintypes
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Sequence, Tuple
 
@@ -16,6 +18,14 @@ CREATE_NO_WINDOW = 0x08000000 if os.name == "nt" else 0
 
 #: States that already mean "this connection is not moving on its own".
 DEFAULT_STUCK_STATES = ("SYN_SENT", "CLOSE_WAIT", "FIN_WAIT_1", "LAST_ACK")
+
+#: A connection in ESTABLISHED can still be dead inside.  This is the reason
+#: used when the socket survives, but the owning process performs no I/O.
+STALLED_REASON = "stalled"
+
+#: Patch clients that are known to hang in ESTABLISHED without a profile.
+#: They are never used for DNS/hosts changes; only for stall diagnostics.
+DEFAULT_STALLED_HINTS = ("PathOfExile", "PoeLauncher")
 
 
 @dataclass
@@ -143,6 +153,64 @@ def parse_tasklist(text: str) -> Dict[int, str]:
     return mapping
 
 
+class _IoCounters(ctypes.Structure):
+    _fields_ = [
+        ("ReadOperationCount", ctypes.c_ulonglong),
+        ("WriteOperationCount", ctypes.c_ulonglong),
+        ("OtherOperationCount", ctypes.c_ulonglong),
+        ("ReadTransferCount", ctypes.c_ulonglong),
+        ("WriteTransferCount", ctypes.c_ulonglong),
+        ("OtherTransferCount", ctypes.c_ulonglong),
+    ]
+
+
+_PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+if os.name == "nt":
+    try:
+        _kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        _kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+        _kernel32.OpenProcess.restype = wintypes.HANDLE
+        _kernel32.GetProcessIoCounters.argtypes = [
+            wintypes.HANDLE,
+            ctypes.POINTER(_IoCounters),
+        ]
+        _kernel32.GetProcessIoCounters.restype = wintypes.BOOL
+        _kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+        _kernel32.CloseHandle.restype = wintypes.BOOL
+    except (AttributeError, OSError):
+        _kernel32 = None
+else:
+    _kernel32 = None
+
+
+def process_io(pid: int) -> Optional[Tuple[int, ...]]:
+    """Return the process I/O counters, or None when they are unavailable.
+
+    Network reads and writes usually show up in these counters.  A socket
+    that stays ESTABLISHED while this tuple does not move is a much better
+    "stalled" signal than the socket state alone.
+    """
+    if _kernel32 is None or not pid:
+        return None
+    handle = _kernel32.OpenProcess(_PROCESS_QUERY_LIMITED_INFORMATION, False, int(pid))
+    if not handle:
+        return None
+    try:
+        counters = _IoCounters()
+        if not _kernel32.GetProcessIoCounters(handle, ctypes.byref(counters)):
+            return None
+        return (
+            counters.ReadOperationCount,
+            counters.WriteOperationCount,
+            counters.OtherOperationCount,
+            counters.ReadTransferCount,
+            counters.WriteTransferCount,
+            counters.OtherTransferCount,
+        )
+    finally:
+        _kernel32.CloseHandle(handle)
+
+
 def _run(command: Sequence[str], timeout: float = 20.0) -> str:
     try:
         completed = subprocess.run(
@@ -195,21 +263,48 @@ def find_stuck(
     interval_sec: float = 3.0,
     pileup_threshold: int = 6,
     second: Optional[Sequence[Connection]] = None,
+    stalled_sec: float = 0.0,
+    stalled_hints: Optional[Sequence[str]] = None,
+    io_reader=process_io,
 ) -> List[StuckConnection]:
     """Find stuck connections by comparing two snapshots.
 
-    A connection is reported once, with ``persistent`` winning over ``pileup``
-    and ``pileup`` over ``state``. When *second* is omitted, the second
-    snapshot is taken live after *interval_sec*.
+    A connection is reported once, with ``stalled`` winning over
+    ``persistent``, ``persistent`` over ``pileup`` and ``pileup`` over
+    ``state``.  A non-zero *stalled_sec* also looks for ESTABLISHED sockets
+    whose owning process performed no I/O during the observation window.
+    ``stalled_hints`` narrows that check to specific processes (by default
+    the same hints as the ordinary scan).
     """
+    wait_sec = stalled_sec if stalled_sec > 0 else interval_sec
+    first_io: Dict[int, Optional[Tuple[int, ...]]] = {}
     if first is None:
-        first, second = snapshot(interval_sec)
-    elif second is None:
-        time.sleep(interval_sec)
+        first = list_connections()
+        if stalled_sec > 0:
+            for connection in first:
+                if connection.pid and connection.pid not in first_io:
+                    first_io[connection.pid] = io_reader(connection.pid)
+        time.sleep(wait_sec)
         second = list_connections()
+    elif second is None:
+        if stalled_sec > 0:
+            for connection in first:
+                if connection.pid and connection.pid not in first_io:
+                    first_io[connection.pid] = io_reader(connection.pid)
+        time.sleep(wait_sec)
+        second = list_connections()
+    elif stalled_sec > 0:
+        for connection in first:
+            if connection.pid and connection.pid not in first_io:
+                first_io[connection.pid] = io_reader(connection.pid)
 
     wanted_states = {state.upper() for state in states}
     lowered_hints = [hint.lower() for hint in hints if hint]
+    stalled_lowered = (
+        lowered_hints
+        if stalled_hints is None
+        else [hint.lower() for hint in stalled_hints if hint]
+    )
 
     def matches(connection: Connection) -> bool:
         # PID 0 rows are kernel placeholders: nothing for the user to fix.
@@ -221,6 +316,14 @@ def find_stuck(
             return True
         name = (connection.process or "").lower()
         return any(hint in name for hint in lowered_hints)
+
+    def stalled_matches(connection: Connection) -> bool:
+        if not stalled_lowered or connection.pid == 0:
+            return False
+        if not _is_routable(connection.remote_ip):
+            return False
+        name = (connection.process or "").lower()
+        return any(hint in name for hint in stalled_lowered)
 
     def key_of(connection: Connection) -> Tuple[str, str, int, str, int]:
         return (
@@ -235,6 +338,21 @@ def find_stuck(
     result: List[StuckConnection] = []
     seen: set = set()
 
+    # ESTABLISHED is not a "stuck state"; it becomes suspicious only when
+    # the same socket survives and the process I/O counters do not move.
+    if stalled_sec > 0 and stalled_lowered:
+        for connection in second:
+            if connection.state != "ESTABLISHED" or not stalled_matches(connection):
+                continue
+            key = key_of(connection)
+            if key in seen or first_states.get(key) != "ESTABLISHED":
+                continue
+            before = first_io.get(connection.pid)
+            after = io_reader(connection.pid)
+            if before is not None and after is not None and before == after:
+                result.append(StuckConnection(connection, STALLED_REASON, stalled_sec))
+                seen.add(key)
+
     for connection in second:
         if not matches(connection):
             continue
@@ -245,7 +363,7 @@ def find_stuck(
             # TIME_WAIT and friends are normal shutdown, not a stuck socket.
             continue
         if first_states.get(key) == connection.state:
-            result.append(StuckConnection(connection, "persistent", interval_sec))
+            result.append(StuckConnection(connection, "persistent", wait_sec))
         else:
             result.append(StuckConnection(connection, "state", 0.0))
         seen.add(key)
@@ -285,13 +403,16 @@ def match_profile(process_name: str, profiles: Dict[str, Sequence[str]]) -> Opti
 __all__ = [
     "Connection",
     "CREATE_NO_WINDOW",
+    "DEFAULT_STALLED_HINTS",
     "DEFAULT_STUCK_STATES",
+    "STALLED_REASON",
     "StuckConnection",
     "find_stuck",
     "list_connections",
     "match_profile",
     "parse_netstat",
     "parse_tasklist",
+    "process_io",
     "snapshot",
     "split_address",
 ]

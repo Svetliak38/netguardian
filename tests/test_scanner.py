@@ -6,6 +6,7 @@ import unittest
 
 from netguardian.scanner import (
     Connection,
+    DEFAULT_STALLED_HINTS,
     find_stuck,
     match_profile,
     parse_netstat,
@@ -149,8 +150,54 @@ class FindStuckTests(unittest.TestCase):
     def test_empty_inputs(self) -> None:
         self.assertEqual(find_stuck([], [], second=[]), [])
 
+    def test_established_without_io_is_stalled(self) -> None:
+        first = [_conn(5000, "92.123.135.140", "ESTABLISHED", 10, "PathOfExile.exe")]
+        second = [_conn(5000, "92.123.135.140", "ESTABLISHED", 10, "PathOfExile.exe")]
+        stuck = find_stuck(
+            first,
+            ["PathOfExile"],
+            (),
+            second=second,
+            stalled_sec=12.0,
+            io_reader=lambda pid: (100, 200, 300),
+        )
+        self.assertEqual(len(stuck), 1)
+        self.assertEqual(stuck[0].reason, "stalled")
+        self.assertEqual(stuck[0].pid, 10)
+
+    def test_established_with_io_progress_is_not_stalled(self) -> None:
+        first = [_conn(5000, "92.123.135.140", "ESTABLISHED", 10, "PathOfExile.exe")]
+        second = [_conn(5000, "92.123.135.140", "ESTABLISHED", 10, "PathOfExile.exe")]
+        values = iter([(100, 200), (100, 220)])
+        stuck = find_stuck(
+            first,
+            ["PathOfExile"],
+            (),
+            second=second,
+            stalled_sec=12.0,
+            io_reader=lambda pid: next(values),
+        )
+        self.assertEqual(stuck, [])
+
+    def test_stalled_requires_a_process_hint(self) -> None:
+        first = [_conn(5000, "92.123.135.140", "ESTABLISHED", 10, "PathOfExile.exe")]
+        second = [_conn(5000, "92.123.135.140", "ESTABLISHED", 10, "PathOfExile.exe")]
+        stuck = find_stuck(
+            first,
+            [],
+            (),
+            second=second,
+            stalled_sec=12.0,
+            io_reader=lambda pid: (100, 200),
+        )
+        self.assertEqual(stuck, [])
+
 
 class MatchProfileTests(unittest.TestCase):
+    def test_default_stalled_hints_cover_poe(self) -> None:
+        self.assertIn("PathOfExile", DEFAULT_STALLED_HINTS)
+        self.assertIn("PoeLauncher", DEFAULT_STALLED_HINTS)
+
     def test_match_profile(self) -> None:
         profiles = {"game": ["game.exe"], "browser": ["msedge"]}
         self.assertEqual(match_profile("Game.exe", profiles), "game")

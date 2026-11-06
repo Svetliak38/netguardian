@@ -4,7 +4,7 @@
  User guide (English)
 ================================================================================
 
-Version:      3.1.5
+Version:      3.1.7
 License:      MIT
 Author:       Svetliak
 Document:     README.en.txt

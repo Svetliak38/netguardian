@@ -99,6 +99,12 @@ class ParserTests(CliTestBase):
         self.assertFalse(payload["ok"])
         self.assertIn("JSON", payload["error"])
 
+    def test_scan_accepts_stalled_process(self) -> None:
+        parser = cli.build_parser()
+        args = parser.parse_args(["scan", "--stalled-wait", "0", "--stalled-process", "PathOfExile"])
+        self.assertEqual(args.stalled_process, ["PathOfExile"])
+        self.assertEqual(args.stalled_wait, 0.0)
+
 
 class StatusTests(CliTestBase):
     def test_status_reports_active_blocks(self) -> None:

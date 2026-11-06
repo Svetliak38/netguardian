@@ -28,7 +28,7 @@ from .log import get_logger
 from .paths import AppPaths
 from .repair import repair_hosts
 from .resolver import Cache, Resolver, tcp_probe
-from .scanner import find_stuck, list_connections, match_profile
+from .scanner import DEFAULT_STALLED_HINTS, find_stuck, list_connections, match_profile
 from .security import is_admin, relaunch_elevated
 from .sslcheck import inspect, issuer_matches
 from .tcpview import TcpViewError, ensure as ensure_tcpview, launch as launch_tcpview
@@ -125,9 +125,22 @@ def cmd_scan(ctx: Context, args: argparse.Namespace) -> int:
     except RuntimeError as exc:
         raise NetGuardianError(i18n.t("scan.failed", error=exc)) from exc
     hints: List[str] = []
+    stalled_hints: List[str] = list(DEFAULT_STALLED_HINTS)
     for profile in ctx.config.profiles.values():
         hints.extend(profile.process_hints)
-    stuck = find_stuck(connections, hints, ctx.config.settings.stuck_states)
+        if not profile.fixable:
+            stalled_hints.extend(profile.process_hints)
+    for extra in (getattr(args, "stalled_process", None) or []):
+        if extra and extra not in stalled_hints:
+            stalled_hints.append(extra)
+    stalled_wait = float(getattr(args, "stalled_wait", 12.0) or 0.0)
+    stuck = find_stuck(
+        connections,
+        hints,
+        ctx.config.settings.stuck_states,
+        stalled_sec=stalled_wait,
+        stalled_hints=stalled_hints,
+    )
 
     if ctx.json:
         _dump(
@@ -138,6 +151,8 @@ def cmd_scan(ctx: Context, args: argparse.Namespace) -> int:
                     "state": item.state,
                     "local": item.local,
                     "remote": item.remote,
+                    "reason": item.reason,
+                    "seen_sec": item.seen_sec,
                 }
                 for item in stuck
             ]
@@ -150,8 +165,11 @@ def cmd_scan(ctx: Context, args: argparse.Namespace) -> int:
 
     ui.header(i18n.t("scan.found", count=len(stuck)))
     ui.table(
-        ["PID", "PROCESS", "STATE", "REMOTE"],
-        [[item.pid, item.process or "?", item.state, item.remote] for item in stuck],
+        ["PID", "PROCESS", "STATE", i18n.t("scan.reason"), "REMOTE"],
+        [
+            [item.pid, item.process or "?", item.state, item.reason, item.remote]
+            for item in stuck
+        ],
     )
     first = stuck[0]
     hints_map = {name: profile.process_hints for name, profile in ctx.config.profiles.items()}
@@ -1224,6 +1242,14 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command", metavar="COMMAND")
 
     scan = subparsers.add_parser("scan", parents=[common], help="scan for stuck connections")
+    scan.add_argument(
+        "--stalled-wait", type=float, default=12.0, metavar="SEC",
+        help="watch ESTABLISHED sockets for this many seconds (default: 12)",
+    )
+    scan.add_argument(
+        "--stalled-process", action="append", default=[], metavar="NAME",
+        help="also watch this process name for ESTABLISHED without I/O (repeatable)",
+    )
     scan.set_defaults(func=cmd_scan)
 
     apply_cmd = subparsers.add_parser("apply", parents=[common], help="apply a profile")
